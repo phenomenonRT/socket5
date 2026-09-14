@@ -1,0 +1,13 @@
+# Build artifacts
+socks5-winclamp
+*.o
+*.so
+*.log
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Config backups
+*.conf.bak
+EOF
