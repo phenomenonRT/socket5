@@ -138,25 +138,7 @@ socks5-control
 
 ---
 
-## 🚀 Публикация в ваш GitHub (`phenomenonRT`)
 
-Чтобы загрузить этот проект в ваш репозиторий на GitHub:
-
-1. Создайте репозиторий с именем **`socket5`** (или `socks5`) в вашем аккаунте GitHub: `https://github.com/phenomenonRT`.
-2. В локальной папке проекта выполните:
-```bash
-git init
-git add .
-git commit -m "Initial release of SOCKS5 Anti-DPI Suite"
-git branch -M main
-git remote add origin https://github.com/phenomenonRT/socket5.git
-git push -u origin main
-```
-
-После этого любой пользователь сможет установить ваш прокси в одну строчку:
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/phenomenonRT/socket5/main/install.sh)
-```
 
 ---
 
