@@ -44,6 +44,8 @@ def make_handler(clamp_window=2, verbose=False):
                     should_clamp = True
                 elif data_len >= 2 and payload[data_offset] == 0x05 and payload[data_offset + 1] in (0x00, 0x02):
                     should_clamp = True
+                elif data_len >= 2 and payload[data_offset] == 0x01 and payload[data_offset + 1] == 0x00:
+                    should_clamp = True
 
                 if should_clamp:
                     old_win = struct.unpack("!H", payload[tcp_offset + 14:tcp_offset + 16])[0]

@@ -36,22 +36,24 @@ show_menu() {
     echo ""
     echo "  1) Статус служб и сетевая статистика"
     echo "  2) Показать данные и ссылки для подключения"
-    echo "  3) Просмотр логов в реальном времени"
-    echo "  4) Сменить пароль пользователя"
-    echo "  5) Перезапустить прокси"
-    echo "  6) Остановить прокси"
-    echo "  7) Запустить прокси"
+    echo "  3) Показать QR-код для Telegram"
+    echo "  4) Просмотр логов в реальном времени"
+    echo "  5) Сменить пароль пользователя"
+    echo "  6) Перезапустить прокси"
+    echo "  7) Остановить прокси"
+    echo "  8) Запустить прокси"
     echo "  0) Выход"
     echo ""
-    read -rp "Выберите пункт меню [1-7, 0]: " CHOICE
+    read -rp "Выберите пункт меню [1-8, 0]: " CHOICE
     case "$CHOICE" in
         1) action_status; read -rp "Нажмите Enter для продолжения..." ;;
         2) action_info; read -rp "Нажмите Enter для продолжения..." ;;
-        3) action_logs ;;
-        4) action_passwd ;;
-        5) action_restart; sleep 1 ;;
-        6) action_stop; sleep 1 ;;
-        7) action_start; sleep 1 ;;
+        3) action_qr; read -rp "Нажмите Enter для продолжения..." ;;
+        4) action_logs ;;
+        5) action_passwd ;;
+        6) action_restart; sleep 1 ;;
+        7) action_stop; sleep 1 ;;
+        8) action_start; sleep 1 ;;
         0) exit 0 ;;
         *) echo "Неверный выбор"; sleep 1 ;;
     esac
@@ -70,6 +72,13 @@ action_status() {
     echo -e "\n${BOLD}2. TCP Window Clamper (Anti-DPI):${NC}"
     if systemctl is-active --quiet socks5-winclamp; then
         echo -e "   Статус: ${GREEN}АКТИВЕН (RUNNING)${NC}"
+        # Trigger stats dump
+        killall -USR1 socks5-winclamp 2>/dev/null || pkill -USR1 socks5-winclamp 2>/dev/null || true
+        local recent_stats
+        recent_stats=$(journalctl -u socks5-winclamp -n 5 --no-pager 2>/dev/null | grep "Stats:" | tail -n 1 || true)
+        if [[ -n "$recent_stats" ]]; then
+            echo -e "   ${CYAN}${recent_stats}${NC}"
+        fi
     else
         echo -e "   Статус: ${RED}ОСТАНОВЛЕН${NC}"
     fi
@@ -106,6 +115,26 @@ action_info() {
         echo -e "    ${YELLOW}tg://socks?server=${SERVER_IP}&port=443&user=${SOCKS_USER}&pass=${SOCKS_PASS}${NC}"
     fi
     echo ""
+    echo -e "  • Проверка через curl:"
+    echo -e "    ${CYAN}curl -x socks5h://${SOCKS_USER}:${SOCKS_PASS}@${SERVER_IP}:${SOCKS_PORT} https://api.ipify.org${NC}"
+    echo ""
+}
+
+action_qr() {
+    SERVER_IP=$(curl -s4 --max-time 3 https://api.ipify.org || echo "YOUR_SERVER_IP")
+    local tg_url="tg://socks?server=${SERVER_IP}&port=${SOCKS_PORT}&user=${SOCKS_USER}&pass=${SOCKS_PASS}"
+    if ! command -v qrencode &>/dev/null; then
+        echo -e "${YELLOW}[!] Утилита qrencode не установлена. Установка...${NC}"
+        apt-get install -y -qq qrencode 2>/dev/null || true
+    fi
+    if command -v qrencode &>/dev/null; then
+        echo -e "\n${CYAN}${BOLD}=== QR-код для быстрого подключения в Telegram ===${NC}\n"
+        qrencode -t ANSI256 "$tg_url" 2>/dev/null || qrencode -t UTF8 "$tg_url" 2>/dev/null || true
+        echo -e "\nСсылка: ${YELLOW}${tg_url}${NC}\n"
+    else
+        echo -e "${RED}[ERROR] qrencode недоступен. Ссылка для подключения:${NC}"
+        echo -e "${YELLOW}${tg_url}${NC}"
+    fi
 }
 
 action_logs() {
@@ -149,6 +178,7 @@ else
     case "$1" in
         status) action_status ;;
         info) action_info ;;
+        qr) action_qr ;;
         logs) action_logs ;;
         restart) action_restart ;;
         stop) action_stop ;;
@@ -163,7 +193,7 @@ else
             fi
             ;;
         *)
-            echo "Использование: socks5-control [status|info|logs|restart|stop|start|passwd]"
+            echo "Использование: socks5-control [status|info|qr|logs|restart|stop|start|passwd]"
             ;;
     esac
 fi

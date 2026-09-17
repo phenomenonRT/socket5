@@ -104,11 +104,17 @@ static int packet_callback(struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
                 reason = "SYN-ACK handshake";
                 g_clamped_synack++;
             }
-            // 2. Server Greeting response (\x05\x00 or \x05\x02): Force client to fragment Connect request
+            // 2. Server Greeting response (\x05\x00 or \x05\x02): Force client to fragment Connect request (no auth) or Auth
             else if (g_clamp_connect && tcp_data_len >= 2 && tcp_data[0] == 0x05 &&
                      (tcp_data[1] == 0x00 || tcp_data[1] == 0x02)) {
                 should_clamp = true;
                 reason = "SOCKS5 method response";
+                g_clamped_response++;
+            }
+            // 3. Server RFC 1929 Auth success (\x01\x00): Force client to fragment Connect request
+            else if (g_clamp_connect && tcp_data_len >= 2 && tcp_data[0] == 0x01 && tcp_data[1] == 0x00) {
+                should_clamp = true;
+                reason = "SOCKS5 auth success response";
                 g_clamped_response++;
             }
 
@@ -155,6 +161,10 @@ static int packet_callback(struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
                            (tcp_data[1] == 0x00 || tcp_data[1] == 0x02)) {
                     should_clamp = true;
                     reason = "SOCKS5 method response";
+                    g_clamped_response++;
+                } else if (g_clamp_connect && tcp_data_len >= 2 && tcp_data[0] == 0x01 && tcp_data[1] == 0x00) {
+                    should_clamp = true;
+                    reason = "SOCKS5 auth success response";
                     g_clamped_response++;
                 }
 

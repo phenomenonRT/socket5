@@ -48,6 +48,7 @@ iptables -D INPUT -p tcp --dport "${SOCKS_PORT}" -j ACCEPT 2>/dev/null || true
 iptables -D INPUT -p tcp --dport "${SOCKS_PORT}" --syn -m hashlimit --hashlimit-name s5_syn --hashlimit 25/sec --hashlimit-burst 50 --hashlimit-mode srcip -j ACCEPT 2>/dev/null || true
 
 if [[ -n "$MULTIPORT_LIST" ]]; then
+    iptables -t nat -D PREROUTING -i "${DEFAULT_IF:-}" -p tcp -m multiport --dports "$MULTIPORT_LIST" -j REDIRECT --to-ports "${SOCKS_PORT}" 2>/dev/null || true
     iptables -t nat -D PREROUTING -p tcp -m multiport --dports "$MULTIPORT_LIST" -j REDIRECT --to-ports "${SOCKS_PORT}" 2>/dev/null || true
     iptables -D INPUT -p tcp -m multiport --dports "$MULTIPORT_LIST" -j ACCEPT 2>/dev/null || true
 fi

@@ -61,6 +61,8 @@ download_repo_file() {
                 write_embedded_winclamp "$target"
             elif [[ "$filename" == "socks5-control.sh" ]]; then
                 write_embedded_control "$target"
+            elif [[ "$filename" == "uninstall.sh" ]]; then
+                write_embedded_uninstall "$target"
             fi
         fi
     fi
@@ -126,6 +128,8 @@ static int packet_callback(struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
             } else if (g_clamp_connect && tcp_data_len >= 2 && tcp_data[0] == 0x05 &&
                        (tcp_data[1] == 0x00 || tcp_data[1] == 0x02)) {
                 should_clamp = true;
+            } else if (g_clamp_connect && tcp_data_len >= 2 && tcp_data[0] == 0x01 && tcp_data[1] == 0x00) {
+                should_clamp = true;
             }
 
             if (should_clamp) {
@@ -182,60 +186,281 @@ write_embedded_control() {
     # shellcheck disable=SC2016
     cat > "$target" << 'EOF_SH'
 #!/usr/bin/env bash
+# ==============================================================================
+# SOCKS5 Anti-DPI Server Management Tool
+# GitHub: https://github.com/phenomenonRT/socket5
+# ==============================================================================
+
 set -euo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
+
 CONFIG_FILE="/etc/socks5-antidpi.conf"
+
 if [[ ! -f "$CONFIG_FILE" ]]; then
-    echo "[ERROR] $CONFIG_FILE не найден." >&2; exit 1
+    echo -e "${RED}[ERROR] Файл конфигурации $CONFIG_FILE не найден. Сервер установлен?${NC}" >&2
+    exit 1
 fi
+
+# shellcheck source=/dev/null
 source "$CONFIG_FILE"
-cmd="${1:-status}"
-case "$cmd" in
-    status)
-        echo "=== Статус SOCKS5 Anti-DPI ==="
-        systemctl status danted --no-pager | head -n 3
-        systemctl status socks5-winclamp --no-pager | head -n 3
-        echo -e "\nПравила iptables:"
-        iptables -t mangle -L OUTPUT -v -n | grep -E "NFQUEUE|Chain" || true
-        echo -e "\nАктивные подключения:"
-        ss -tan state established "( sport = :${SOCKS_PORT} )" | head -n 10
-        ;;
-    info)
-        SERVER_IP=$(curl -s4 --max-time 3 https://api.ipify.org || echo "YOUR_IP")
-        echo "=== Реквизиты подключения ==="
-        echo "Сервер:  $SERVER_IP"
-        echo "Порт:    $SOCKS_PORT (зеркала: ${MULTIPORT_LIST:-нет})"
-        echo "Логин:   $SOCKS_USER"
-        echo "Пароль:  $SOCKS_PASS"
-        echo "URL:     socks5://${SOCKS_USER}:${SOCKS_PASS}@${SERVER_IP}:${SOCKS_PORT}"
-        echo "Telegram: tg://socks?server=${SERVER_IP}&port=${SOCKS_PORT}&user=${SOCKS_USER}&pass=${SOCKS_PASS}"
-        ;;
-    logs)
-        journalctl -u socks5-winclamp -u danted -f
-        ;;
-    restart)
-        systemctl restart socks5-winclamp danted
-        echo "[OK] Службы перезапущены."
-        ;;
-    stop)
-        systemctl stop socks5-winclamp danted
-        echo "[OK] Службы остановлены."
-        ;;
-    start)
-        systemctl start socks5-winclamp danted
-        echo "[OK] Службы запущены."
-        ;;
-    passwd)
-        NEW_PASS="${2:-}"
-        if [[ -z "$NEW_PASS" ]]; then echo "Использование: socks5-control passwd <новый_пароль>"; exit 1; fi
+
+show_menu() {
+    clear
+    echo -e "${CYAN}${BOLD}======================================================================${NC}"
+    echo -e "${CYAN}${BOLD}         SOCKS5 Anti-DPI — Панель управления сервером                ${NC}"
+    echo -e "${CYAN}${BOLD}======================================================================${NC}"
+    echo -e "Порт: ${GREEN}${SOCKS_PORT}${NC} | Пользователь: ${GREEN}${SOCKS_USER}${NC}"
+    if [[ -n "${MULTIPORT_LIST:-}" ]]; then
+        echo -e "Зеркала портов: ${YELLOW}${MULTIPORT_LIST}${NC}"
+    fi
+    echo ""
+    echo "  1) Статус служб и сетевая статистика"
+    echo "  2) Показать данные и ссылки для подключения"
+    echo "  3) Показать QR-код для Telegram"
+    echo "  4) Просмотр логов в реальном времени"
+    echo "  5) Сменить пароль пользователя"
+    echo "  6) Перезапустить прокси"
+    echo "  7) Остановить прокси"
+    echo "  8) Запустить прокси"
+    echo "  0) Выход"
+    echo ""
+    read -rp "Выберите пункт меню [1-8, 0]: " CHOICE
+    case "$CHOICE" in
+        1) action_status; read -rp "Нажмите Enter для продолжения..." ;;
+        2) action_info; read -rp "Нажмите Enter для продолжения..." ;;
+        3) action_qr; read -rp "Нажмите Enter для продолжения..." ;;
+        4) action_logs ;;
+        5) action_passwd ;;
+        6) action_restart; sleep 1 ;;
+        7) action_stop; sleep 1 ;;
+        8) action_start; sleep 1 ;;
+        0) exit 0 ;;
+        *) echo "Неверный выбор"; sleep 1 ;;
+    esac
+}
+
+action_status() {
+    echo -e "\n${CYAN}${BOLD}=== Статус SOCKS5 Anti-DPI ===${NC}\n"
+
+    echo -e "${BOLD}1. Dante Daemon (SOCKS5):${NC}"
+    if systemctl is-active --quiet danted; then
+        echo -e "   Статус: ${GREEN}АКТИВЕН (RUNNING)${NC}"
+    else
+        echo -e "   Статус: ${RED}ОСТАНОВЛЕН${NC}"
+    fi
+
+    echo -e "\n${BOLD}2. TCP Window Clamper (Anti-DPI):${NC}"
+    if systemctl is-active --quiet socks5-winclamp; then
+        echo -e "   Статус: ${GREEN}АКТИВЕН (RUNNING)${NC}"
+        killall -USR1 socks5-winclamp 2>/dev/null || pkill -USR1 socks5-winclamp 2>/dev/null || true
+        local recent_stats
+        recent_stats=$(journalctl -u socks5-winclamp -n 5 --no-pager 2>/dev/null | grep "Stats:" | tail -n 1 || true)
+        if [[ -n "$recent_stats" ]]; then
+            echo -e "   ${CYAN}${recent_stats}${NC}"
+        fi
+    else
+        echo -e "   Статус: ${RED}ОСТАНОВЛЕН${NC}"
+    fi
+
+    echo -e "\n${BOLD}3. Счетчики пакетов очереди NFQUEUE (iptables):${NC}"
+    iptables -t mangle -L OUTPUT -v -n --line-numbers | grep -E "NFQUEUE|Chain" || true
+
+    if [[ -n "${MULTIPORT_LIST:-}" ]]; then
+        echo -e "\n${BOLD}4. Счетчики мультипортового зеркала (Redirect):${NC}"
+        iptables -t nat -L PREROUTING -v -n | grep -E "REDIRECT|to-ports" || true
+    fi
+
+    echo -e "\n${BOLD}5. Активные соединения с клиентами:${NC}"
+    ss -tan state established "( sport = :${SOCKS_PORT} )" | head -n 15
+    echo ""
+}
+
+action_info() {
+    SERVER_IP=$(curl -s4 --max-time 3 https://api.ipify.org || echo "YOUR_SERVER_IP")
+    echo -e "\n${CYAN}${BOLD}=== Данные для подключения ===${NC}"
+    echo -e "  • Сервер:         ${GREEN}${SERVER_IP}${NC}"
+    echo -e "  • Основной порт:  ${GREEN}${SOCKS_PORT}${NC}"
+    if [[ -n "${MULTIPORT_LIST:-}" ]]; then
+        echo -e "  • Зеркальные порты: ${YELLOW}${MULTIPORT_LIST}${NC}"
+    fi
+    echo -e "  • Логин:          ${GREEN}${SOCKS_USER}${NC}"
+    echo -e "  • Пароль:         ${GREEN}${SOCKS_PASS}${NC}"
+    echo ""
+    echo -e "  • SOCKS5 URL:     ${YELLOW}socks5://${SOCKS_USER}:${SOCKS_PASS}@${SERVER_IP}:${SOCKS_PORT}${NC}"
+    echo -e "  • Telegram порт ${SOCKS_PORT}:"
+    echo -e "    ${YELLOW}tg://socks?server=${SERVER_IP}&port=${SOCKS_PORT}&user=${SOCKS_USER}&pass=${SOCKS_PASS}${NC}"
+    if [[ "${MULTIPORT_LIST:-}" =~ 443 ]]; then
+        echo -e "  • Telegram порт 443 (HTTPS маскировка):"
+        echo -e "    ${YELLOW}tg://socks?server=${SERVER_IP}&port=443&user=${SOCKS_USER}&pass=${SOCKS_PASS}${NC}"
+    fi
+    echo ""
+    echo -e "  • Проверка через curl:"
+    echo -e "    ${CYAN}curl -x socks5h://${SOCKS_USER}:${SOCKS_PASS}@${SERVER_IP}:${SOCKS_PORT} https://api.ipify.org${NC}"
+    echo ""
+}
+
+action_qr() {
+    SERVER_IP=$(curl -s4 --max-time 3 https://api.ipify.org || echo "YOUR_SERVER_IP")
+    local tg_url="tg://socks?server=${SERVER_IP}&port=${SOCKS_PORT}&user=${SOCKS_USER}&pass=${SOCKS_PASS}"
+    if ! command -v qrencode &>/dev/null; then
+        echo -e "${YELLOW}[!] Утилита qrencode не установлена. Установка...${NC}"
+        apt-get install -y -qq qrencode 2>/dev/null || true
+    fi
+    if command -v qrencode &>/dev/null; then
+        echo -e "\n${CYAN}${BOLD}=== QR-код для быстрого подключения в Telegram ===${NC}\n"
+        qrencode -t ANSI256 "$tg_url" 2>/dev/null || qrencode -t UTF8 "$tg_url" 2>/dev/null || true
+        echo -e "\nСсылка: ${YELLOW}${tg_url}${NC}\n"
+    else
+        echo -e "${RED}[ERROR] qrencode недоступен. Ссылка для подключения:${NC}"
+        echo -e "${YELLOW}${tg_url}${NC}"
+    fi
+}
+
+action_logs() {
+    echo -e "${CYAN}${BOLD}=== Просмотр логов в реальном времени (Ctrl+C для возврата) ===${NC}"
+    journalctl -u socks5-winclamp -u danted -f
+}
+
+action_passwd() {
+    read -rp "Введите новый пароль для ${SOCKS_USER}: " NEW_PASS
+    if [[ -n "$NEW_PASS" ]]; then
         echo "${SOCKS_USER}:${NEW_PASS}" | chpasswd
         sed -i "s/^SOCKS_PASS=.*/SOCKS_PASS=${NEW_PASS}/" "$CONFIG_FILE"
-        echo "[OK] Пароль успешно изменен."
-        ;;
-    *)
-        echo "Использование: socks5-control {status|info|logs|restart|stop|start|passwd}"
-        ;;
-esac
+        echo -e "${GREEN}[OK] Пароль успешно изменен!${NC}"
+    fi
+}
+
+action_restart() {
+    echo -e "${BLUE}[*] Перезапуск служб...${NC}"
+    systemctl restart socks5-winclamp danted
+    echo -e "${GREEN}[OK] Службы перезапущены.${NC}"
+}
+
+action_stop() {
+    echo -e "${BLUE}[*] Остановка служб...${NC}"
+    systemctl stop socks5-winclamp danted
+    echo -e "${YELLOW}[OK] Службы остановлены.${NC}"
+}
+
+action_start() {
+    echo -e "${BLUE}[*] Запуск служб...${NC}"
+    systemctl start socks5-winclamp danted
+    echo -e "${GREEN}[OK] Службы запущены.${NC}"
+}
+
+# Direct CLI flags or interactive menu
+if [[ $# -eq 0 ]]; then
+    while true; do
+        show_menu
+    done
+else
+    case "$1" in
+        status) action_status ;;
+        info) action_info ;;
+        qr) action_qr ;;
+        logs) action_logs ;;
+        restart) action_restart ;;
+        stop) action_stop ;;
+        start) action_start ;;
+        passwd)
+            if [[ -n "${2:-}" ]]; then
+                echo "${SOCKS_USER}:${2}" | chpasswd
+                sed -i "s/^SOCKS_PASS=.*/SOCKS_PASS=${2}/" "$CONFIG_FILE"
+                echo -e "${GREEN}[OK] Пароль успешно изменен.${NC}"
+            else
+                action_passwd
+            fi
+            ;;
+        *)
+            echo "Использование: socks5-control [status|info|qr|logs|restart|stop|start|passwd]"
+            ;;
+    esac
+fi
 EOF_SH
+    chmod 755 "$target"
+}
+
+write_embedded_uninstall() {
+    local target="$1"
+    cat > "$target" << 'EOF_UNINSTALL'
+#!/usr/bin/env bash
+# ==============================================================================
+# SOCKS5 Anti-DPI Server Uninstaller
+# GitHub: https://github.com/phenomenonRT/socket5
+# ==============================================================================
+
+set -euo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+CONFIG_FILE="/etc/socks5-antidpi.conf"
+
+if [[ "$(id -u)" -ne 0 ]]; then
+    echo -e "${RED}[ERROR] Запустите от root (или sudo).${NC}" >&2
+    exit 1
+fi
+
+echo -e "${YELLOW}${BOLD}=== Полное удаление SOCKS5 Anti-DPI ===${NC}"
+read -rp "Вы уверены, что хотите полностью удалить прокси и правила? [y/N]: " CONFIRM
+if [[ "${CONFIRM,,}" != "y" ]]; then
+    echo "Отмена."
+    exit 0
+fi
+
+if [[ -f "$CONFIG_FILE" ]]; then
+    # shellcheck source=/dev/null
+    source "$CONFIG_FILE"
+fi
+
+SOCKS_PORT="${SOCKS_PORT:-1080}"
+QUEUE_NUM="${QUEUE_NUM:-200}"
+MULTIPORT_LIST="${MULTIPORT_LIST:-}"
+
+echo -e "${BLUE}[1/5] Остановка и отключение служб...${NC}"
+systemctl stop socks5-winclamp danted 2>/dev/null || true
+systemctl disable socks5-winclamp danted 2>/dev/null || true
+rm -f /etc/systemd/system/socks5-winclamp.service
+systemctl daemon-reload
+
+echo -e "${BLUE}[2/5] Очистка правил iptables...${NC}"
+iptables -t mangle -D OUTPUT -p tcp --sport "${SOCKS_PORT}" -j NFQUEUE --queue-num "${QUEUE_NUM}" 2>/dev/null || true
+iptables -D INPUT -p tcp --dport "${SOCKS_PORT}" -j ACCEPT 2>/dev/null || true
+iptables -D INPUT -p tcp --dport "${SOCKS_PORT}" --syn -m hashlimit --hashlimit-name s5_syn --hashlimit 25/sec --hashlimit-burst 50 --hashlimit-mode srcip -j ACCEPT 2>/dev/null || true
+
+if [[ -n "$MULTIPORT_LIST" ]]; then
+    iptables -t nat -D PREROUTING -i "${DEFAULT_IF:-}" -p tcp -m multiport --dports "$MULTIPORT_LIST" -j REDIRECT --to-ports "${SOCKS_PORT}" 2>/dev/null || true
+    iptables -t nat -D PREROUTING -p tcp -m multiport --dports "$MULTIPORT_LIST" -j REDIRECT --to-ports "${SOCKS_PORT}" 2>/dev/null || true
+    iptables -D INPUT -p tcp -m multiport --dports "$MULTIPORT_LIST" -j ACCEPT 2>/dev/null || true
+fi
+
+if command -v netfilter-persistent &>/dev/null; then
+    netfilter-persistent save 2>/dev/null || true
+fi
+
+echo -e "${BLUE}[3/5] Удаление бинарных файлов и утилит...${NC}"
+rm -f /usr/local/bin/socks5-winclamp
+rm -f /usr/local/bin/socks5-control
+rm -rf /opt/socks5-antidpi
+
+echo -e "${BLUE}[4/5] Очистка файлов конфигурации...${NC}"
+rm -f /etc/sysctl.d/99-socks5-antidpi.conf
+rm -f "$CONFIG_FILE"
+
+echo -e "${BLUE}[5/5] Завершение...${NC}"
+echo -e "${GREEN}${BOLD}[OK] SOCKS5 Anti-DPI успешно удален!${NC}"
+EOF_UNINSTALL
     chmod 755 "$target"
 }
 
@@ -324,7 +549,8 @@ apt-get install -y -qq \
     netfilter-persistent \
     curl \
     ethtool \
-    ca-certificates
+    ca-certificates \
+    qrencode
 
 echo -e "${BLUE}[2/6] Загрузка и компиляция ядра обхода (socks5-winclamp)...${NC}"
 download_repo_file "socks5-winclamp.c"
@@ -404,18 +630,34 @@ iptables -I INPUT -p tcp --dport "${SOCKS_PORT}" -j ACCEPT
 
 MULTIPORT_LIST=""
 if [[ "$BYPASS_MODE" == "1" ]]; then
-    # Мультипортовый режим: зеркалируем популярные доверенные порты (443, 8443, 2083, 53)
-    MIRROR_PORTS="443,8443,2083,53"
-    MULTIPORT_LIST="$MIRROR_PORTS"
-    
-    # Очищаем старые редиректы
-    iptables -t nat -D PREROUTING -p tcp -m multiport --dports "$MIRROR_PORTS" -j REDIRECT --to-ports "${SOCKS_PORT}" 2>/dev/null || true
-    iptables -D INPUT -p tcp -m multiport --dports "$MIRROR_PORTS" -j ACCEPT 2>/dev/null || true
-    
-    # Добавляем редирект
-    iptables -t nat -A PREROUTING -p tcp -m multiport --dports "$MIRROR_PORTS" -j REDIRECT --to-ports "${SOCKS_PORT}"
-    iptables -I INPUT -p tcp -m multiport --dports "$MIRROR_PORTS" -j ACCEPT
-    echo -e "    ${GREEN}[+] Включено мультипортовое зеркалирование: 443 (HTTPS), 8443, 2083, 53 (DNS)${NC}"
+    # Мультипортовый режим: проверяем порты-кандидаты (443, 8443, 2083, 53)
+    MIRROR_CANDIDATES=(443 8443 2083 53)
+    VALID_MIRRORS=()
+    for p in "${MIRROR_CANDIDATES[@]}"; do
+        if [[ "$p" == "$SOCKS_PORT" ]]; then
+            continue
+        fi
+        if ss -tulpn 2>/dev/null | grep -qE "(:|\])${p}\s"; then
+            echo -e "    ${YELLOW}[!] Порт ${p} уже используется другой службой на сервере, пропускаем.${NC}"
+        else
+            VALID_MIRRORS+=("$p")
+        fi
+    done
+
+    if [[ ${#VALID_MIRRORS[@]} -gt 0 ]]; then
+        MIRROR_PORTS=$(IFS=,; echo "${VALID_MIRRORS[*]}")
+        MULTIPORT_LIST="$MIRROR_PORTS"
+
+        # Очищаем старые редиректы
+        iptables -t nat -D PREROUTING -i "${DEFAULT_IF}" -p tcp -m multiport --dports "$MIRROR_PORTS" -j REDIRECT --to-ports "${SOCKS_PORT}" 2>/dev/null || true
+        iptables -t nat -D PREROUTING -p tcp -m multiport --dports "$MIRROR_PORTS" -j REDIRECT --to-ports "${SOCKS_PORT}" 2>/dev/null || true
+        iptables -D INPUT -p tcp -m multiport --dports "$MIRROR_PORTS" -j ACCEPT 2>/dev/null || true
+
+        # Добавляем редирект на внешнем интерфейсе
+        iptables -t nat -A PREROUTING -i "${DEFAULT_IF}" -p tcp -m multiport --dports "$MIRROR_PORTS" -j REDIRECT --to-ports "${SOCKS_PORT}"
+        iptables -I INPUT -p tcp -m multiport --dports "$MIRROR_PORTS" -j ACCEPT
+        echo -e "    ${GREEN}[+] Включено мультипортовое зеркалирование: ${MIRROR_PORTS}${NC}"
+    fi
 fi
 
 # Сохранение правил iptables
@@ -424,10 +666,11 @@ netfilter-persistent save 2>/dev/null || iptables-save > /etc/iptables/rules.v4 
 # Отключение аппаратной сегментации (TSO/GSO)
 ethtool -K "$DEFAULT_IF" tso off gso off gro off 2>/dev/null || true
 
-echo -e "${BLUE}[6/6] Оптимизация TCP BBR...${NC}"
+echo -e "${BLUE}[6/6] Оптимизация TCP BBR и фиксация TCP Window...${NC}"
 cat > /etc/sysctl.d/99-socks5-antidpi.conf <<EOF
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
+net.ipv4.tcp_window_scaling = 0
 net.ipv4.tcp_slow_start_after_idle = 0
 net.ipv4.tcp_tw_reuse = 1
 net.ipv4.tcp_fin_timeout = 15
