@@ -296,9 +296,10 @@ action_info() {
     echo -e "  • SOCKS5 URL:     ${YELLOW}socks5://${SOCKS_USER}:${SOCKS_PASS}@${SERVER_IP}:${SOCKS_PORT}${NC}"
     echo -e "  • Telegram порт ${SOCKS_PORT}:"
     echo -e "    ${YELLOW}tg://socks?server=${SERVER_IP}&port=${SOCKS_PORT}&user=${SOCKS_USER}&pass=${SOCKS_PASS}${NC}"
-    if [[ "${MULTIPORT_LIST:-}" =~ 443 ]]; then
-        echo -e "  • Telegram порт 443 (HTTPS маскировка):"
-        echo -e "    ${YELLOW}tg://socks?server=${SERVER_IP}&port=443&user=${SOCKS_USER}&pass=${SOCKS_PASS}${NC}"
+    if [[ -n "${MULTIPORT_LIST:-}" ]]; then
+        FIRST_MIRROR=$(echo "$MULTIPORT_LIST" | cut -d',' -f1)
+        echo -e "  • Telegram резервный порт ${FIRST_MIRROR} (маскировка):"
+        echo -e "    ${YELLOW}tg://socks?server=${SERVER_IP}&port=${FIRST_MIRROR}&user=${SOCKS_USER}&pass=${SOCKS_PASS}${NC}"
     fi
     echo ""
     echo -e "  • Проверка через curl:"
@@ -469,6 +470,28 @@ ARG_PORT=""
 ARG_USER=""
 ARG_PASS=""
 ARG_MODE=""
+ARG_MIRRORS=""
+
+is_port_in_use() {
+    local port="$1"
+    # 1. Listening socket via ss
+    if ss -tlnH 2>/dev/null | grep -qE "(:|\])${port}\s"; then
+        return 0
+    fi
+    # 2. Listening socket via lsof
+    if command -v lsof &>/dev/null && lsof -iTCP:"${port}" -sTCP:LISTEN &>/dev/null; then
+        return 0
+    fi
+    # 3. Docker container port mappings (bridge / host)
+    if command -v docker &>/dev/null && docker ps --format '{{.Ports}}' 2>/dev/null | grep -qE "(:|->)${port}/"; then
+        return 0
+    fi
+    # 4. iptables NAT table rules (captures Docker DNAT even when userland-proxy is disabled!)
+    if iptables -t nat -S 2>/dev/null | grep -v "REDIRECT --to-ports ${SOCKS_PORT}" | grep -qE -- "--dport\s+${port}\b"; then
+        return 0
+    fi
+    return 1
+}
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -476,11 +499,13 @@ while [[ $# -gt 0 ]]; do
         -u|--user) ARG_USER="$2"; shift 2 ;;
         -P|--password) ARG_PASS="$2"; shift 2 ;;
         -m|--mode) ARG_MODE="$2"; shift 2 ;;
+        -M|--mirrors) ARG_MIRRORS="$2"; shift 2 ;;
         -h|--help)
-            echo "Использование: bash install.sh [-p порт] [-u логин] [-P пароль] [-m режим]"
+            echo "Использование: bash install.sh [-p порт] [-u логин] [-P пароль] [-m режим] [-M зеркальные_порты]"
             echo "Режимы (-m):"
-            echo "  1 - Ультра (Window Clamping + Multiport 443,8443,53 + Anti-Probe)"
+            echo "  1 - Ультра (Window Clamping + Multiport + Anti-Probe)"
             echo "  2 - Классик (Только Window Clamping на одном порту)"
+            echo "Зеркала (-M): Список портов через запятую, например: 8443,2083"
             exit 0 ;;
         *) shift ;;
     esac
@@ -630,15 +655,22 @@ iptables -I INPUT -p tcp --dport "${SOCKS_PORT}" -j ACCEPT
 
 MULTIPORT_LIST=""
 if [[ "$BYPASS_MODE" == "1" ]]; then
-    # Мультипортовый режим: проверяем порты-кандидаты (443, 8443, 2083, 53)
-    MIRROR_CANDIDATES=(443 8443 2083 53)
+    if [[ -n "$ARG_MIRRORS" ]]; then
+        IFS=',' read -ra USER_CANDIDATES <<< "$ARG_MIRRORS"
+        MIRROR_CANDIDATES=("${USER_CANDIDATES[@]}")
+    else
+        MIRROR_CANDIDATES=(443 8443 2083 53)
+    fi
+
     VALID_MIRRORS=()
     for p in "${MIRROR_CANDIDATES[@]}"; do
+        p=$(echo "$p" | tr -d ' ')
+        [[ -z "$p" ]] && continue
         if [[ "$p" == "$SOCKS_PORT" ]]; then
             continue
         fi
-        if ss -tulpn 2>/dev/null | grep -qE "(:|\])${p}\s"; then
-            echo -e "    ${YELLOW}[!] Порт ${p} уже используется другой службой на сервере, пропускаем.${NC}"
+        if is_port_in_use "$p"; then
+            echo -e "    ${YELLOW}[!] Порт ${p} занят другой службой (процесс/Docker/iptables), пропускаем.${NC}"
         else
             VALID_MIRRORS+=("$p")
         fi
@@ -657,6 +689,8 @@ if [[ "$BYPASS_MODE" == "1" ]]; then
         iptables -t nat -A PREROUTING -i "${DEFAULT_IF}" -p tcp -m multiport --dports "$MIRROR_PORTS" -j REDIRECT --to-ports "${SOCKS_PORT}"
         iptables -I INPUT -p tcp -m multiport --dports "$MIRROR_PORTS" -j ACCEPT
         echo -e "    ${GREEN}[+] Включено мультипортовое зеркалирование: ${MIRROR_PORTS}${NC}"
+    else
+        echo -e "    ${YELLOW}[!] Все порты-кандидаты зеркалирования заняты, работаем только на основном порту ${SOCKS_PORT}.${NC}"
     fi
 fi
 
@@ -712,8 +746,9 @@ echo -e "\n${BOLD}Готовые ссылки:${NC}"
 echo -e "  • Telegram порт ${SOCKS_PORT}:"
 echo -e "    ${YELLOW}tg://socks?server=${SERVER_IP}&port=${SOCKS_PORT}&user=${SOCKS_USER}&pass=${SOCKS_PASS}${NC}"
 if [[ -n "$MULTIPORT_LIST" ]]; then
-echo -e "  • Telegram резервный порт 443 (HTTPS маскировка):"
-echo -e "    ${YELLOW}tg://socks?server=${SERVER_IP}&port=443&user=${SOCKS_USER}&pass=${SOCKS_PASS}${NC}"
+    FIRST_MIRROR=$(echo "$MULTIPORT_LIST" | cut -d',' -f1)
+    echo -e "  • Telegram резервный порт ${FIRST_MIRROR} (маскировка):"
+    echo -e "    ${YELLOW}tg://socks?server=${SERVER_IP}&port=${FIRST_MIRROR}&user=${SOCKS_USER}&pass=${SOCKS_PASS}${NC}"
 fi
 
 echo -e "\n${BOLD}Быстрая проверка из терминала на клиенте:${NC}"

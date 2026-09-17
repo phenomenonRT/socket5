@@ -110,9 +110,10 @@ action_info() {
     echo -e "  • SOCKS5 URL:     ${YELLOW}socks5://${SOCKS_USER}:${SOCKS_PASS}@${SERVER_IP}:${SOCKS_PORT}${NC}"
     echo -e "  • Telegram порт ${SOCKS_PORT}:"
     echo -e "    ${YELLOW}tg://socks?server=${SERVER_IP}&port=${SOCKS_PORT}&user=${SOCKS_USER}&pass=${SOCKS_PASS}${NC}"
-    if [[ "${MULTIPORT_LIST:-}" =~ 443 ]]; then
-        echo -e "  • Telegram порт 443 (HTTPS маскировка):"
-        echo -e "    ${YELLOW}tg://socks?server=${SERVER_IP}&port=443&user=${SOCKS_USER}&pass=${SOCKS_PASS}${NC}"
+    if [[ -n "${MULTIPORT_LIST:-}" ]]; then
+        FIRST_MIRROR=$(echo "$MULTIPORT_LIST" | cut -d',' -f1)
+        echo -e "  • Telegram резервный порт ${FIRST_MIRROR} (маскировка):"
+        echo -e "    ${YELLOW}tg://socks?server=${SERVER_IP}&port=${FIRST_MIRROR}&user=${SOCKS_USER}&pass=${SOCKS_PASS}${NC}"
     fi
     echo ""
     echo -e "  • Проверка через curl:"
