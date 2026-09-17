@@ -119,6 +119,9 @@ action_info() {
     echo -e "  • Проверка через curl:"
     echo -e "    ${CYAN}curl -x socks5h://${SOCKS_USER}:${SOCKS_PASS}@${SERVER_IP}:${SOCKS_PORT} https://api.ipify.org${NC}"
     echo ""
+    echo -e "  • Безопасность:"
+    echo -e "    ${YELLOW}⚠️  SOCKS5 не шифрует открытый трафик (это не VPN). Защищены только HTTPS и Telegram.${NC}"
+    echo ""
 }
 
 action_qr() {

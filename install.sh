@@ -30,6 +30,10 @@ echo "    SOCKS5 Anti-DPI Suite — Серверный обход блокиро
 echo "    GitHub: https://github.com/${REPO}"
 echo "======================================================================"
 echo -e "${NC}"
+echo -e "${YELLOW}${BOLD}⚠️  ВНИМАНИЕ ПО БЕЗОПАСНОСТИ И ЗАЩИТЕ ДАННЫХ:${NC}"
+echo -e "   • SOCKS5 — открытый прокси-протокол, он ${RED}${BOLD}НЕ шифрует${NC} трафик (это не VPN)."
+echo -e "   • Комплекс предназначен только для ${CYAN}обхода блокировок ТСПУ${NC}."
+echo -e "   • Данные защищены только внутри приложений с шифрованием (Telegram, HTTPS).\n"
 
 if [[ "$(id -u)" -ne 0 ]]; then
     echo -e "${RED}[ERROR] Запустите скрипт с правами root: sudo bash install.sh${NC}" >&2
@@ -304,6 +308,9 @@ action_info() {
     echo ""
     echo -e "  • Проверка через curl:"
     echo -e "    ${CYAN}curl -x socks5h://${SOCKS_USER}:${SOCKS_PASS}@${SERVER_IP}:${SOCKS_PORT} https://api.ipify.org${NC}"
+    echo ""
+    echo -e "  • Безопасность:"
+    echo -e "    ${YELLOW}⚠️  SOCKS5 не шифрует открытый трафик (это не VPN). Защищены только HTTPS и Telegram.${NC}"
     echo ""
 }
 
