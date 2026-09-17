@@ -12,7 +12,7 @@
 
 ## ⚡ Быстрая онлайн-установка одной командой
 
-На вашем сервере VPS (Ubuntu 20.04/22.04/24.04 или Debian 10/11/12) выполните:
+На вашем сервере VPS (Ubuntu 20.04/22.04/24.04/26.04 или Debian 10/11/12/13) выполните:
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/phenomenonRT/socket5/main/install.sh)

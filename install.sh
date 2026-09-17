@@ -3,7 +3,7 @@
 # SOCKS5 Anti-DPI Suite — Online Installer
 # GitHub: https://github.com/phenomenonRT/socket5
 # Bypass Russian TSPU / РКН DPI without changing any client software!
-# Supported OS: Ubuntu 20.04 / 22.04 / 24.04, Debian 10 / 11 / 12
+# Supported OS: Ubuntu 20.04 / 22.04 / 24.04 / 26.04, Debian 10 / 11 / 12 / 13
 # ==============================================================================
 
 set -euo pipefail
@@ -512,7 +512,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Detect Network
-DEFAULT_IF=$(ip -4 route show default | awk '{print $5}' | head -n1 || ip route | grep '^default' | head -n1 | awk '{print $5}' || true)
+DEFAULT_IF=$(ip -4 route show default 2>/dev/null | awk '/dev/ {for(i=1;i<=NF;i++) if($i=="dev") {print $(i+1); exit}}' || true)
+if [[ -z "$DEFAULT_IF" ]]; then
+    DEFAULT_IF=$(ip route 2>/dev/null | awk '/default/ && /dev/ {for(i=1;i<=NF;i++) if($i=="dev") {print $(i+1); exit}}' || true)
+fi
+if [[ -z "$DEFAULT_IF" ]]; then
+    DEFAULT_IF=$(ip -4 route show default 2>/dev/null | awk '{print $5}' | head -n1 || true)
+fi
 SERVER_IP=$(curl -s4 --max-time 4 https://api.ipify.org || curl -s4 --max-time 4 https://ifconfig.me || echo "YOUR_SERVER_IP")
 
 echo -e "Сетевой интерфейс: ${GREEN}${DEFAULT_IF}${NC}"
