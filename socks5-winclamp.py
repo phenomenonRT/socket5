@@ -2,6 +2,11 @@
 """
 socks5-winclamp.py — Python fallback implementation of TCP Window Clamper
 Uses netfilterqueue to clamp outbound SYN-ACK and SOCKS5 response window sizes.
+
+NOTE: This is a minimal legacy fallback for hosts without a C toolchain.
+It does NOT implement IPv6, TOFU enrollment or auto-ban — use the C daemon
+(socks5-winclamp.c) for the full feature set including the stealth mode.
+Requires: pip install netfilterqueue
 """
 
 import sys
@@ -36,6 +41,9 @@ def make_handler(clamp_window=2, verbose=False):
                 syn = bool(flags & 0x02)
                 ack = bool(flags & 0x10)
                 tcp_hl = ((payload[tcp_offset + 12] >> 4) & 0x0f) * 4
+                if tcp_hl < 20:
+                    pkt.accept()
+                    return
                 data_offset = tcp_offset + tcp_hl
                 data_len = len(payload) - data_offset
 

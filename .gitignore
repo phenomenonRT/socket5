@@ -4,10 +4,13 @@ socks5-winclamp
 *.so
 *.log
 
+# Python
+__pycache__/
+*.pyc
+
 # System files
 .DS_Store
 Thumbs.db
 
 # Config backups
 *.conf.bak
-EOF
